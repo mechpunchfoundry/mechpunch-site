@@ -1,0 +1,264 @@
+/* ============================================================
+   TOKENS
+   Palette is brand-derived: rust and gunmetal are locked from the
+   wordmark; the darks are cool graphite rather than a tinted black,
+   so the ground reads as unlit metal rather than as "dark mode".
+   ============================================================ */
+:root{
+  --rust:        #C4531D;
+  --rust-lit:    #E9701F;
+  --forge:       #FFB25C;
+  --hot:         #FFF3E2;
+  --gunmetal:    #B7BBC2;
+  --gunmetal-dim:#7E858F;
+  --graphite:    #101316;
+  --iron:        #171B20;
+  --edge:        #262C34;
+
+  --measure: 62ch;
+  --gutter: clamp(1.25rem, 4vw, 3rem);
+  --rule: 1px solid var(--edge);
+}
+
+*,*::before,*::after{ box-sizing:border-box; }
+
+html{ -webkit-text-size-adjust:100%; }
+
+body{
+  margin:0;
+  background:var(--graphite);
+  color:#D7DBE0;
+  font-family:'Rokkitt', Georgia, serif;
+  font-weight:400;
+  font-size:clamp(1.0625rem, 0.98rem + 0.4vw, 1.1875rem);
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+
+a{ color:var(--gunmetal); text-underline-offset:0.22em; text-decoration-thickness:1px; }
+a:hover{ color:var(--rust-lit); }
+a:focus-visible, button:focus-visible{
+  outline:2px solid var(--rust-lit);
+  outline-offset:3px;
+}
+
+h1,h2,h3{ font-weight:800; line-height:1.12; letter-spacing:-0.01em; margin:0; color:#EDEFF2; }
+
+/* ============================================================
+   STING LAYER
+   ============================================================ */
+#sting{
+  position:fixed; inset:0; z-index:100;
+  background:
+    radial-gradient(120% 90% at 50% 78%, #1a1f25 0%, #0d1013 58%, #08090b 100%);
+  display:block;
+}
+#sting[hidden]{ display:none; }
+
+#forge{
+  position:absolute; inset:0;
+  width:100%; height:100%;
+  display:block;
+  will-change:transform, filter;
+}
+
+#flash{
+  position:absolute; inset:0;
+  background:#fff;
+  opacity:0;
+  pointer-events:none;
+  mix-blend-mode:screen;
+}
+
+#wordmark-layer{
+  position:absolute;
+  left:50%; top:50%;
+  transform:translate(-50%, -50%) translateY(calc(-1 * clamp(150px, 27vh, 250px)));
+  width:min(460px, 58vw);
+  opacity:0;
+  pointer-events:none;
+}
+#wordmark-layer svg{ display:block; width:100%; height:auto; }
+
+#prompt{
+  position:absolute;
+  left:50%; bottom:clamp(48px, 11vh, 108px);
+  transform:translateX(-50%);
+  opacity:0;
+  border:0; background:none; padding:0.6em 1.2em;
+  color:var(--gunmetal);
+  font-family:'Oswald', system-ui, sans-serif;
+  font-weight:500;
+  font-size:0.8125rem;
+  letter-spacing:0.22em;
+  cursor:pointer;
+}
+
+/* ============================================================
+   SITE
+   ============================================================ */
+#site{
+  opacity:0;
+  transition:opacity .8s ease;
+}
+#site.on{ opacity:1; }
+
+.wrap{
+  width:min(1080px, 100% - (var(--gutter) * 2));
+  margin-inline:auto;
+}
+
+/* --- masthead --- */
+.masthead{
+  display:flex; align-items:center; gap:clamp(1rem,3vw,2rem);
+  padding-block:clamp(1.25rem, 3vw, 2rem);
+  border-bottom:var(--rule);
+}
+.mark{
+  width:clamp(64px, 8vw, 92px); aspect-ratio:431/560; height:auto;
+  background:url('fist-128.png') center/contain no-repeat;
+  flex:none;
+  image-rendering:pixelated;
+}
+.masthead .lockup{ width:min(380px, 44vw); }
+.masthead .lockup svg{ display:block; width:100%; height:auto; }
+
+.nav{
+  margin-left:auto;
+  display:flex; gap:clamp(1rem, 3vw, 2.25rem);
+  font-family:'Oswald', system-ui, sans-serif;
+  font-size:0.875rem;
+  letter-spacing:0.06em;
+}
+.nav a{ text-decoration:none; color:var(--gunmetal-dim); }
+.nav a:hover{ color:var(--rust-lit); }
+
+/* --- lede --- */
+.lede{
+  padding-block:clamp(3.5rem, 11vw, 7rem) clamp(2.5rem, 8vw, 5rem);
+}
+.lede h1{
+  font-size:clamp(2.6rem, 1.5rem + 5.5vw, 5rem);
+  text-wrap:balance;
+  max-width:18ch;
+}
+.lede p{
+  max-width:var(--measure);
+  margin:clamp(1.25rem, 3vw, 2rem) 0 0;
+  color:#AEB4BC;
+}
+
+/* --- rivet rule: the wordmark's own device, reused as a section boundary --- */
+.rivet{
+  display:flex; align-items:center; gap:0;
+  margin-block:clamp(2rem, 6vw, 3.5rem);
+}
+.rivet::before, .rivet::after{
+  content:''; width:8px; height:8px; border-radius:50%;
+  background:var(--edge); flex:none;
+}
+.rivet span{ flex:1; height:1px; background:var(--edge); }
+
+/* --- sections --- */
+.section{ padding-block:clamp(1rem, 3vw, 2rem); }
+.section h2{
+  font-size:clamp(1.35rem, 1.1rem + 0.9vw, 1.75rem);
+  margin-bottom:clamp(1rem, 2.5vw, 1.5rem);
+}
+.section p{ max-width:var(--measure); color:#AEB4BC; }
+.section p + p{ margin-top:1em; }
+
+/* --- game plate: corner brackets, lifted from the wordmark --- */
+.plate{
+  position:relative;
+  padding:clamp(1.5rem, 4vw, 2.5rem);
+  background:var(--iron);
+  max-width:44rem;
+}
+.plate::before, .plate::after{
+  content:''; position:absolute;
+  width:22px; height:22px;
+  border:2px solid var(--gunmetal-dim);
+}
+.plate::before{ left:10px; top:10px; border-right:0; border-bottom:0; }
+.plate::after{ right:10px; bottom:10px; border-left:0; border-top:0; }
+
+.plate h3{
+  font-size:clamp(1.25rem, 1.05rem + 0.7vw, 1.5rem);
+  color:var(--rust-lit);
+}
+.plate .meta{
+  font-family:'Oswald', system-ui, sans-serif;
+  font-size:0.8125rem;
+  letter-spacing:0.1em;
+  color:var(--gunmetal-dim);
+  margin:0.5rem 0 1rem;
+}
+.plate p{ margin:0; }
+.go{
+  display:inline-block;
+  margin-top:1.5rem;
+  font-family:'Oswald', system-ui, sans-serif;
+  font-size:0.875rem;
+  letter-spacing:0.08em;
+  color:var(--rust-lit);
+  text-decoration:none;
+  border-bottom:1px solid var(--rust);
+  padding-bottom:2px;
+}
+.go:hover{ color:var(--forge); border-color:var(--forge); }
+
+/* --- contact --- */
+.contact ul{ list-style:none; margin:0; padding:0; }
+.contact li{ margin-bottom:0.5rem; }
+.contact .label{
+  font-family:'Oswald', system-ui, sans-serif;
+  font-size:0.8125rem;
+  letter-spacing:0.1em;
+  color:var(--gunmetal-dim);
+  display:inline-block;
+  min-width:7.5rem;
+}
+
+/* --- footer --- */
+.foot{
+  border-top:var(--rule);
+  margin-top:clamp(3rem, 9vw, 6rem);
+  padding-block:clamp(1.5rem, 4vw, 2.5rem) clamp(2.5rem, 6vw, 4rem);
+  display:flex; align-items:center; gap:1rem;
+  color:var(--gunmetal-dim);
+  font-size:0.9375rem;
+}
+.foot .mark{ width:26px; height:34px; aspect-ratio:auto; opacity:0.55; }
+
+/* --- hero image (game pages) --- */
+.hero{
+  margin:clamp(1.5rem, 4vw, 2.5rem) 0 0;
+  border:var(--rule);
+  background:var(--iron);
+  line-height:0;
+}
+.hero img{
+  display:block; width:100%; height:auto;
+}
+
+/* --- narrow screens ---------------------------------------------------
+   The masthead has no room for mark + lockup + nav on a phone, and
+   squeezing the lockup makes the wordmark illegible. Let the nav drop
+   to its own row instead so the lockup keeps a readable size.
+   ---------------------------------------------------------------- */
+@media (max-width: 34rem){
+  .masthead{ flex-wrap:wrap; row-gap:0.9rem; }
+  .masthead .lockup{ width:min(300px, 62vw); }
+  .nav{
+    margin-left:0; width:100%;
+    justify-content:flex-start;
+    gap:1.5rem;
+    padding-top:0.25rem;
+    border-top:var(--rule);
+  }
+}
+
+@media (prefers-reduced-motion: reduce){
+  *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
+}

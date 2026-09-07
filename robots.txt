@@ -1,0 +1,14 @@
+# MechPunch Foundry — https://www.mechpunch.com/
+#
+# Everything is open to crawlers, including AI crawlers: no training
+# opt-outs are set here by choice.
+#
+# /pixelsoldiers/ is deliberately crawlable but carries a noindex meta
+# tag, so it is not listed in search results. Blocking it here instead
+# would be counter-productive: a disallowed page cannot be read, so the
+# noindex would never be seen.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://www.mechpunch.com/sitemap.xml

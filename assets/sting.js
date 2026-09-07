@@ -1,0 +1,1118 @@
+import * as THREE from 'three';
+
+/* ================================================================
+   0. GATES — reduced motion, session, and the site-reveal handoff
+   ================================================================ */
+const stingEl  = document.getElementById('sting');
+const siteEl   = document.getElementById('site');
+const flashEl  = document.getElementById('flash');
+const wmLayer  = document.getElementById('wordmark-layer');
+const promptEl = document.getElementById('prompt');
+const canvas   = document.getElementById('forge');
+
+const prefersReduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const seenThisSession = sessionStorage.getItem('mpf.sting') === '1';
+const isCoarse = matchMedia('(pointer: coarse)').matches;
+
+function revealSite(){
+  sessionStorage.setItem('mpf.sting','1');
+  siteEl.classList.add('on');
+  document.body.style.overflow = '';
+  stingEl.setAttribute('hidden','');
+  running = false;
+}
+
+let running = false;
+
+// invoked at the foot of this module, once every declaration below exists
+function start(){
+  if (prefersReduced || seenThisSession){
+    revealSite();
+  } else {
+    document.body.style.overflow = 'hidden';
+    running = true;
+    boot();
+  }
+}
+
+/* ================================================================
+   1. TIMELINE
+   A minimal keyframe scheduler. Every beat — joints, sparks, glow,
+   wordmark, camera — runs off one clock, so retiming one thing
+   cannot drift against another. Replaces GSAP; §1.4 permits an
+   equivalent timeline approach.
+   ================================================================ */
+const Ease = {
+  linear: t => t,
+  outCubic: t => 1 - Math.pow(1-t, 3),
+  inCubic:  t => t*t*t,
+  inOutCubic: t => t < .5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2,
+  outQuint: t => 1 - Math.pow(1-t, 5),
+  inQuad: t => t*t,
+  outBack: t => { const c1=1.9, c3=c1+1; return 1 + c3*Math.pow(t-1,3) + c1*Math.pow(t-1,2); },
+  outElastic: t => {
+    if (t===0||t===1) return t;
+    const p = 2*Math.PI/3;
+    return Math.pow(2,-9*t) * Math.sin((t*10-0.75)*p) + 1;
+  }
+};
+
+class Timeline {
+  constructor(){ this.tracks=[]; this.marks=[]; this.t=0; this.playing=false; this.onDone=null; }
+  add(start, dur, ease, fn){ this.tracks.push({start, dur, ease, fn, done:false, started:false}); return this; }
+  mark(at, fn){ this.marks.push({at, fn, fired:false}); return this; }
+  get duration(){
+    const a = this.tracks.reduce((m,t)=>Math.max(m, t.start+t.dur), 0);
+    const b = this.marks.reduce((m,t)=>Math.max(m, t.at), 0);
+    return Math.max(a,b);
+  }
+  play(){ this.t = 0; this.playing = true;
+    this.tracks.forEach(t=>{t.done=false;t.started=false;});
+    this.marks.forEach(m=>m.fired=false); return this; }
+  update(dt){
+    if (!this.playing) return;
+    this.t += dt;
+    for (const m of this.marks){
+      if (!m.fired && this.t >= m.at){ m.fired = true; m.fn(); }
+    }
+    for (const tr of this.tracks){
+      if (tr.done) continue;
+      const local = this.t - tr.start;
+      if (local < 0) continue;
+      const p = tr.dur <= 0 ? 1 : Math.min(local / tr.dur, 1);
+      tr.fn(Ease[tr.ease](p), p);
+      if (p >= 1) tr.done = true;
+    }
+    if (this.t >= this.duration){
+      this.playing = false;
+      if (this.onDone) this.onDone();
+    }
+  }
+}
+
+/* ================================================================
+   2. SCENE
+   ================================================================ */
+let renderer, scene, camera, clock, hand, sparks, glow, backdrop;
+let idlePhase = 0, glowLevel = 0, breathing = false;
+let spitTimer = 0;
+const _spit = new THREE.Vector3();
+let introTL, revealTL;
+let jolt = {x:0,y:0,t:0};
+
+const DPR_CAP = isCoarse ? 1.5 : 2;
+const SPARK_MAX = isCoarse ? 420 : 1000;
+
+function boot(){
+  renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false, powerPreference:'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, DPR_CAP));
+  renderer.setSize(innerWidth, innerHeight, false);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  renderer.setClearColor(0x08090b, 1);
+
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 0.1, 100);
+  camera.position.set(0, -0.05, 5.3);
+  camera.lookAt(0, -0.05, 0);
+
+  buildBackdrop();
+  buildLights();
+  hand = buildHand();
+  scene.add(hand.root);
+
+  sparks = new Sparks(scene, SPARK_MAX);
+  glow   = buildGlow();
+
+  clock = new THREE.Clock();
+  addEventListener('resize', onResize);
+
+  buildIntro();
+  introTL.play();
+
+  // the fist is clickable, as is anywhere else on the sting; the raycast is
+  // only for the cursor and the hover flare, so the affordance reads as the
+  // fist rather than as the text prompt alone
+  stingEl.addEventListener('pointermove', onPointerMove);
+  stingEl.addEventListener('click', startReveal);
+  addEventListener('keydown', onKey);
+
+  requestAnimationFrame(tick);
+}
+
+function onResize(){
+  if (!renderer) return;
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(devicePixelRatio, DPR_CAP));
+  renderer.setSize(innerWidth, innerHeight, false);
+}
+
+const _ray = new THREE.Raycaster();
+const _ptr = new THREE.Vector2();
+const _wp  = new THREE.Vector3();
+let overFist = false;
+let pointerPx = null;
+
+// current and target tension per finger, 0..1
+const grip = { index:0, middle:0, ring:0, pinky:0 };
+const gripTarget = { index:0, middle:0, ring:0, pinky:0 };
+
+function onPointerMove(e){
+  pointerPx = { x:e.clientX, y:e.clientY };
+  if (!promptReady){ overFist = false; return; }
+  _ptr.x =  (e.clientX / innerWidth)  * 2 - 1;
+  _ptr.y = -(e.clientY / innerHeight) * 2 + 1;
+  _ray.setFromCamera(_ptr, camera);
+  overFist = _ray.intersectObject(hand.root, true).length > 0;
+  stingEl.style.cursor = overFist ? 'pointer' : 'default';
+}
+
+stingEl && stingEl.addEventListener('pointerleave', () => { pointerPx = null; });
+
+// screen position of a finger's middle joint, for the distance falloff
+function fingerScreen(f){
+  f.joints[1].getWorldPosition(_wp);
+  _wp.project(camera);
+  return { x:( _wp.x*0.5 + 0.5) * innerWidth,
+           y:(-_wp.y*0.5 + 0.5) * innerHeight };
+}
+
+// Distance from the pointer to the NEAREST part of a finger, not to one joint.
+// Measuring from the middle joint alone made a pointer sitting on a fingertip
+// read as further away than it was.
+function fingerDist(f, px){
+  let best = Infinity;
+  for (const j of f.joints){
+    j.getWorldPosition(_wp);
+    _wp.project(camera);
+    const x = ( _wp.x*0.5 + 0.5) * innerWidth;
+    const y = (-_wp.y*0.5 + 0.5) * innerHeight;
+    const d = Math.hypot(px.x - x, px.y - y);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function updateGrip(dt, active){
+  const k = 1 - Math.exp(-GRIP.ease * dt);
+
+  // raw proximity per finger
+  const raw = {};
+  let lead = null, leadVal = 0;
+  for (const spec of FINGERS){
+    let n = 0;
+    if (active && pointerPx){
+      const d = fingerDist(hand.fingers[spec.name], pointerPx);
+      if (d < GRIP.radius) n = Math.pow(1 - d / GRIP.radius, 3);
+    }
+    raw[spec.name] = n;
+    if (n > leadVal){ leadVal = n; lead = spec.name; }
+  }
+
+  // the finger under the pointer leads; its neighbours follow at a fraction set
+  // by how many fingers away they are, so the tension spreads through the hand
+  // instead of one finger acting alone
+  const leadIdx = FINGERS.findIndex(f => f.name === lead);
+  for (let i = 0; i < FINGERS.length; i++){
+    const spec = FINGERS[i];
+    const coupled = leadIdx < 0 ? 0
+      : leadVal * (GRIP.couple[Math.abs(i - leadIdx)] ?? 0);
+    const target = Math.max(raw[spec.name], coupled);
+    gripTarget[spec.name] = target;
+    grip[spec.name] += (target - grip[spec.name]) * k;
+    if (grip[spec.name] > 0.0005 || target > 0){
+      setFingerCurl(hand.fingers[spec.name], 1 + grip[spec.name] * GRIP.max);
+    }
+  }
+}
+
+function onKey(e){
+  if (!running) return;
+  if (e.key === 'Escape'){ revealSite(); return; }
+  if (promptReady && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); startReveal(); }
+}
+
+function buildBackdrop(){
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(128, 200, 0, 128, 200, 210);
+  grad.addColorStop(0.00, '#1a1f25');
+  grad.addColorStop(0.58, '#0d1013');
+  grad.addColorStop(1.00, '#08090b');
+  g.fillStyle = grad; g.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map:tex, depthWrite:false, depthTest:false, toneMapped:false })
+  );
+  m.position.set(0, 0, -14);
+  m.renderOrder = -1;
+  backdrop = m;
+  camera.add(m);
+  scene.add(camera);
+  sizeBackdrop();
+}
+
+function sizeBackdrop(){
+  if (!backdrop) return;
+  const h = 2 * 14 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * 1.05;
+  backdrop.scale.set(h * camera.aspect, h, 1);
+}
+
+function buildLights(){
+  scene.add(new THREE.AmbientLight(0x6b7684, 0.85));
+
+  const key = new THREE.DirectionalLight(0xe8eef7, 3.4);
+  key.position.set(-3.0, 3.4, 5.2);
+  scene.add(key);
+
+  const rim = new THREE.DirectionalLight(0xffb279, 1.9);
+  rim.position.set(4.0, 2.4, -1.6);
+  scene.add(rim);
+
+  const kick = new THREE.DirectionalLight(0x8fb4e8, 1.9);
+  kick.position.set(-4.2, -0.6, -2.8);
+  scene.add(kick);
+
+  const fill = new THREE.DirectionalLight(0x4a5a72, 1.2);
+  fill.position.set(2.4, -2.4, 2.6);
+  scene.add(fill);
+}
+
+/* ================================================================
+   3. HAND
+   Rigid node hierarchy, NOT a skinned mesh. Armour plates do not
+   deform, so parented rigid meshes give identical motion with no
+   weight painting and no vertex smear at the joints.
+
+   BONE-NAMING CONTRACT — a Blender glTF export using these exact
+   node names drops straight in: delete buildHand()'s geometry,
+   load the glTF, and bindRig() finds the same joints by name.
+     hand_root / wrist / palm
+     finger_<index|middle|ring|pinky>_<prox|mid|dist>
+     thumb_<meta|prox|dist>
+   Local convention: +Z faces camera, fingers extend +Y from the
+   palm, curl is +rotation.x (tips travel toward camera, then down
+   onto the palm). Thumb sits at +X — correct for a LEFT hand seen
+   palm-on, so the thumb reads on frame-right.
+   ================================================================ */
+
+const MAT = {
+  steel: new THREE.MeshStandardMaterial({ color:0x5d656f, metalness:0.60, roughness:0.44, flatShading:true }),
+  dark:  new THREE.MeshStandardMaterial({ color:0x363d46, metalness:0.68, roughness:0.55, flatShading:true }),
+  rust:  new THREE.MeshStandardMaterial({ color:0x8c3f1c, metalness:0.48, roughness:0.70, flatShading:true }),
+  hinge: new THREE.MeshStandardMaterial({ color:0x1c2026, metalness:0.9,  roughness:0.32, flatShading:true })
+};
+
+function plate(w,h,d,mat,x=0,y=0,z=0){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z);
+  return m;
+}
+
+function hinge(r,len,mat,x=0,y=0,z=0){
+  const g = new THREE.CylinderGeometry(r,r,len,8,1);
+  g.rotateZ(Math.PI/2);              // axis along X
+  const m = new THREE.Mesh(g, mat);
+  m.position.set(x,y,z);
+  return m;
+}
+
+const FINGERS = [
+  { name:'index',  x: 0.46, w:0.33, segs:[0.56,0.41,0.32], splay:-0.04 },
+  { name:'middle', x: 0.15, w:0.35, segs:[0.60,0.44,0.34], splay:-0.01 },
+  { name:'ring',   x:-0.16, w:0.32, segs:[0.56,0.41,0.31], splay: 0.02 },
+  { name:'pinky',  x:-0.46, w:0.28, segs:[0.46,0.34,0.26], splay: 0.06 }
+];
+
+// Slot texture: a temperature gradient ACROSS the short axis — white-hot down
+// the centre line falling to deep red at the lips — with the ends faded out.
+// A flat colour reads as an emitter; the gradient is what reads as hot metal.
+let _slotTex = null;
+function slotTexture(){
+  if (_slotTex) return _slotTex;
+  const c = document.createElement('canvas'); c.width = 128; c.height = 64;
+  const g = c.getContext('2d');
+  const across = g.createLinearGradient(0, 0, 0, 64);
+  across.addColorStop(0.00, 'rgba(150, 20,  0, 0)');
+  across.addColorStop(0.22, 'rgba(214, 58,  8, 0.75)');
+  across.addColorStop(0.40, 'rgba(255,132, 34, 0.97)');
+  across.addColorStop(0.50, 'rgba(255,206,140, 1)');
+  across.addColorStop(0.60, 'rgba(255,132, 34, 0.97)');
+  across.addColorStop(0.78, 'rgba(214, 58,  8, 0.75)');
+  across.addColorStop(1.00, 'rgba(150, 20,  0, 0)');
+  g.fillStyle = across; g.fillRect(0, 0, 128, 64);
+  // taper the ends so a slot does not stop dead
+  const along = g.createLinearGradient(0, 0, 128, 0);
+  along.addColorStop(0.00, 'rgba(0,0,0,0)');
+  along.addColorStop(0.16, 'rgba(0,0,0,0.72)');
+  along.addColorStop(0.50, 'rgba(0,0,0,1)');
+  along.addColorStop(0.84, 'rgba(0,0,0,0.72)');
+  along.addColorStop(1.00, 'rgba(0,0,0,0)');
+  g.globalCompositeOperation = 'destination-in';
+  g.fillStyle = along; g.fillRect(0, 0, 128, 64);
+  _slotTex = new THREE.CanvasTexture(c);
+  _slotTex.colorSpace = THREE.SRGBColorSpace;
+  return _slotTex;
+}
+
+// seam slots emit the Beat 5 melt glow; each flickers on its own phase and rate
+// so no two cracks pulse together
+const seams = [];
+
+function seamQuad(w, h, x, y, z, opts = {}){
+  const vertical = h > w;
+  const L = vertical ? h : w, S = vertical ? w : h;
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(L, S),
+    new THREE.MeshBasicMaterial({ map:slotTexture(), color:(opts.color ?? 0xff8c30),
+      transparent:true, opacity:0, blending:THREE.AdditiveBlending,
+      depthWrite:false, side:THREE.DoubleSide })
+  );
+  m.position.set(x, y, z);
+  if (vertical) m.rotation.z = Math.PI/2;
+  if (opts.rotX) m.rotation.x = opts.rotX;
+  seams.push({
+    mat:   m.material,
+    gain:  opts.gain ?? 0.7,
+    rate:  1.6 + Math.random()*4.4,
+    phase: Math.random() * Math.PI * 2
+  });
+  return m;
+}
+
+function buildFinger(spec){
+  const depth = 0.30;
+  const groups = [];
+  let parent = null, root = null;
+
+  spec.segs.forEach((len, i) => {
+    const tier = ['prox','mid','dist'][i];
+    const g = new THREE.Group();
+    g.name = `finger_${spec.name}_${tier}`;
+    const w = spec.w * (1 - i*0.09);
+    const d = depth  * (1 - i*0.09);
+
+    // segment shell + dorsal knuckle plate (camera-facing side once curled)
+    g.add(plate(w, len, d, MAT.steel, 0, len/2, 0));
+    g.add(plate(w*0.86, len*0.55, d*0.34, MAT.dark, 0, len*0.62, d*0.56));
+    // joint hinge at the base of the segment
+    g.add(hinge(w*0.46, w*1.04, MAT.hinge, 0, 0, 0));
+    // seam: the gap the forge light leaks through
+    g.add(seamQuad(w*0.94, 0.05, 0, 0.02, d*0.52 + 0.001, { gain:0.55, color:0xff6a1e }));
+
+    if (i === 2){
+      g.add(plate(w*0.86, 0.11, d*0.92, MAT.rust, 0, len, 0));      // fingertip cap
+      g.add(plate(w*0.62, len*0.5, d*0.30, MAT.dark, 0, len*0.6, -d*0.55));
+    }
+
+    if (parent){ g.position.y = spec.segs[i-1]; parent.add(g); }
+    else { root = g; }
+    groups.push(g);
+    parent = g;
+  });
+
+  root.rotation.z = spec.splay;
+  return { root, joints: groups, tipLocal: spec.segs[2] };
+}
+
+function buildThumb(){
+  const specs = [
+    { tier:'meta', len:0.48, w:0.30 },
+    { tier:'prox', len:0.38, w:0.27 },
+    { tier:'dist', len:0.28, w:0.24 }
+  ];
+  // thumb_base carries the sweep (adduction across the palm, and lift toward
+  // the camera). thumb_meta carries the AXIAL ROLL about the thumb's own long
+  // axis — the opposition/pronation that a real CMC saddle joint contributes
+  // and that a pure hinge cannot produce. Splitting them onto two nodes is
+  // what makes the roll happen about the thumb column rather than about the
+  // palm's axis.
+  const base = new THREE.Group(); base.name = 'thumb_base';
+  const groups = [];
+  let parent = base;
+
+  specs.forEach((s, i) => {
+    const g = new THREE.Group();
+    g.name = `thumb_${s.tier}`;
+    const d = 0.27 - i*0.025;
+    g.add(plate(s.w, s.len, d, MAT.steel, 0, s.len/2, 0));
+    g.add(plate(s.w*0.84, s.len*0.50, d*0.36, MAT.dark, 0, s.len*0.60,  d*0.56)); // nail side, +Z local
+    g.add(plate(s.w*0.76, s.len*0.44, d*0.20, MAT.rust, 0, s.len*0.55, -d*0.58)); // pad side, -Z local
+    g.add(hinge(s.w*0.46, s.w*1.04, MAT.hinge, 0, 0, 0));
+    g.add(seamQuad(s.w*0.94, 0.05, 0, 0.02, d*0.52 + 0.001, { gain:0.5, color:0xff6a1e }));
+    if (i === 2) g.add(plate(s.w*0.80, 0.10, d*0.9, MAT.rust, 0, s.len, 0));
+    if (i > 0) g.position.y = specs[i-1].len;
+    parent.add(g);
+    groups.push(g);
+    parent = g;
+  });
+
+  return { root: base, meta: groups[0], joints: groups };
+}
+
+// ---------------------------------------------------------------------------
+// THE MELT
+// Not additive light. A self-lit SURFACE with a crust, so it reads as a hot
+// solid-going-liquid rather than as something emitting. Three things matter:
+//   - irregular geometry, displaced per-vertex, so no silhouette is elliptical
+//   - per-face colour, most of it deep orange with darker crust patches, and
+//     NO hot centre — a uniform bright core is what makes a glow read as a lamp
+//   - toneMapped:false, because ACES pushes saturated orange toward yellow at
+//     high values, which was doing as much damage as the shape was
+// ---------------------------------------------------------------------------
+const MELT_CRUST = new THREE.Color(0x4e1604);
+const MELT_BODY  = new THREE.Color(0xd4470a);
+const MELT_HOT   = new THREE.Color(0xff8f28);
+
+function meltGeometry(radius, seed, flatten){
+  const g = new THREE.IcosahedronGeometry(radius, 4);
+  const pos = g.attributes.position;
+  const v = new THREE.Vector3();
+  const n0 = new THREE.Vector3();
+  const cols = new Float32Array(pos.count * 3);
+  const c = new THREE.Color();
+
+  for (let i = 0; i < pos.count; i++){
+    v.fromBufferAttribute(pos, i);
+    n0.copy(v).normalize();
+    // big low-frequency lumps, so the silhouette is a slumped mass rather
+    // than a faceted solid
+    const lump = 1
+      + 0.30 * Math.sin(n0.x * 2.6 + seed)      * Math.cos(n0.y * 2.1 - seed)
+      + 0.20 * Math.sin(n0.z * 3.4 - seed * 1.4)
+      + 0.10 * Math.cos(n0.x * 5.1 + n0.z * 4.2 + seed * 2.2);
+    v.multiplyScalar(lump);
+    pos.setXYZ(i, v.x, v.y * flatten, v.z * 0.86);
+
+    // mottling varies smoothly across the surface: crust skinning over in
+    // patches with hotter metal showing through, no bright centre anywhere
+    const m = 0.5 + 0.5 * (
+      0.55 * Math.sin(n0.x * 4.3 + seed * 1.9) +
+      0.30 * Math.cos(n0.y * 6.1 - seed) +
+      0.15 * Math.sin(n0.z * 9.7 + seed * 0.4));
+    if (m < 0.34) c.copy(MELT_CRUST).lerp(MELT_BODY, m / 0.34);
+    else          c.copy(MELT_BODY).lerp(MELT_HOT, (m - 0.34) / 0.66);
+    // vertex colour attributes are taken as linear; without this the authored
+    // orange comes out of the sRGB encode as pale amber
+    c.convertSRGBToLinear();
+    cols[i*3] = c.r; cols[i*3+1] = c.g; cols[i*3+2] = c.b;
+  }
+
+  g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+function meltMaterial(){
+  return new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0,
+    toneMapped: false, side: THREE.DoubleSide
+  });
+}
+
+function buildMelt(){
+  const group = new THREE.Group();
+  group.name = 'melt';
+
+  const mass = new THREE.Mesh(meltGeometry(0.20, 1.3, 0.66), meltMaterial());
+  mass.position.set(-0.03, 0.44, 0.26);
+  group.add(mass);
+
+  // a second lobe, offset and smaller — two overlapping masses never read as
+  // one ellipse the way a single scaled sphere does
+  const lobe = new THREE.Mesh(meltGeometry(0.13, 4.9, 0.74), meltMaterial());
+  lobe.position.set(0.13, 0.36, 0.24);
+  group.add(lobe);
+
+  const light = new THREE.PointLight(0xff4a0c, 0, 1.25, 2.4);
+  light.position.copy(mass.position);
+  group.add(light);
+
+  return { group, mass, lobe, light };
+}
+
+function buildHand(){
+  const root = new THREE.Group();  root.name  = 'hand_root';
+  const wrist = new THREE.Group(); wrist.name = 'wrist';
+  const palm = new THREE.Group();  palm.name  = 'palm';
+
+  root.add(wrist); wrist.add(palm);
+
+  // --- palm block ---
+  palm.add(plate(1.34, 0.90, 0.42, MAT.steel, 0, 0.26, 0));
+  palm.add(plate(1.40, 0.22, 0.50, MAT.dark,  0, 0.80, 0.02));   // knuckle ridge
+  palm.add(plate(1.22, 0.32, 0.42, MAT.dark,  0,-0.34, 0));      // heel
+  palm.add(plate(1.22, 0.07, 0.44, MAT.rust,  0,-0.52, 0));      // heel accent
+  palm.add(plate(0.04, 0.86, 0.44, MAT.hinge, -0.38, 0.26, 0));  // panel divisions
+  palm.add(plate(0.04, 0.86, 0.44, MAT.hinge,  0.38, 0.26, 0));
+  palm.add(plate(0.28, 0.56, 0.40, MAT.dark,  0.66,-0.04, 0.01)); // thumb web
+
+  // fixed seam strips — the light that leaks out of the sealed fist
+  palm.add(seamQuad(1.32, 0.05, 0, 0.795, 0.27, { gain:0.8, color:0xff9a3a }));
+  palm.add(seamQuad(1.14, 0.07, 0, 0.44,  0.245, { gain:1.0, color:0xffb45e }));
+  // the gaps between the curled fingers — irregular widths and heights on
+  // purpose, so the openings do not read as a symmetrical pattern
+  [[ 0.305, 0.052, 0.34, 0.9],
+   [-0.005, 0.040, 0.42, 1.0],
+   [-0.305, 0.046, 0.30, 0.8]].forEach(([x, w, h, g]) =>
+     palm.add(seamQuad(w, h, x, 0.64, 0.36, { gain:g, color:0xffb04a })));
+  palm.add(seamQuad(0.030, 0.22, 0.58, 0.58, 0.30, { gain:0.6, color:0xff7a24 }));
+  palm.add(seamQuad(0.030, 0.22,-0.58, 0.58, 0.30, { gain:0.6, color:0xff7a24 }));
+
+  // The melt itself: a blob held inside the curl, plus a light at the same
+  // point so the INSIDE faces of the fingers and the palm are lit from within.
+  // The light is what sells molten metal; the blob alone reads as a decal.
+  const palmShade = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.36, 0.96),
+    new THREE.MeshBasicMaterial({ color:0x04060a, transparent:true, opacity:0, depthWrite:false })
+  );
+  palmShade.position.set(0, 0.26, 0.222);
+  palm.add(palmShade);
+
+  const melt = buildMelt();
+  palm.add(melt.group);
+
+  // palm forge core — dark until Beat 7
+  const core = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.25, 1.25),
+    new THREE.MeshBasicMaterial({ map:panelTexture(), color:0xff7d1c, transparent:true, opacity:0,
+      blending:THREE.AdditiveBlending, depthWrite:false })
+  );
+  core.position.set(0, 0.26, 0.225);
+  palm.add(core);
+
+  // --- wrist / forearm cuff ---
+  const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.53, 0.46, 10, 1), MAT.dark);
+  cuff.position.set(0, -0.86, 0);
+  wrist.add(cuff);
+  const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.41, 1.30, 10, 1), MAT.steel);
+  forearm.position.set(0, -1.74, 0);
+  wrist.add(forearm);
+  wrist.add(plate(1.06, 0.18, 0.58, MAT.rust, 0, -1.32, 0));
+
+  // --- fingers ---
+  const fingers = {};
+  FINGERS.forEach(spec => {
+    const f = buildFinger(spec);
+    f.root.position.set(spec.x, 0.86, 0.04);
+    palm.add(f.root);
+    fingers[spec.name] = f;
+  });
+
+  // --- thumb ---
+  const thumb = buildThumb();
+  thumb.root.position.set(0.62, 0.01, 0.10);
+  thumb.root.rotation.z = -0.62;
+  thumb.root.rotation.x =  0.22;
+  thumb.meta.rotation.y =  THUMB.rollRest;
+  palm.add(thumb.root);
+
+  root.position.y = -4.4;
+  return { root, wrist, palm, fingers, thumb, core, melt, palmShade };
+}
+
+// world position of a fingertip, for spark placement
+const _v = new THREE.Vector3();
+function tipWorld(f){
+  const last = f.joints[2];
+  _v.set(0, f.tipLocal, 0);
+  return last.localToWorld(_v.clone());
+}
+
+/* ================================================================
+   4. SPARKS
+   Pooled Points, additive. Fade is done by driving colour to black
+   rather than per-particle alpha, which additive blending gives for
+   free and avoids a custom shader.
+   ================================================================ */
+function sparkTexture(){
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32,32,0,32,32,32);
+  grad.addColorStop(0,   'rgba(255,255,255,1)');
+  grad.addColorStop(0.25,'rgba(255,220,150,0.85)');
+  grad.addColorStop(1,   'rgba(255,140,40,0)');
+  g.fillStyle = grad; g.fillRect(0,0,64,64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+class Sparks {
+  constructor(scene, max){
+    this.max = max; this.head = 0;
+    this.pos  = new Float32Array(max*3).fill(-9999);
+    this.col  = new Float32Array(max*3);
+    this.vel  = new Float32Array(max*3);
+    this.life = new Float32Array(max);
+    this.ttl  = new Float32Array(max);
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(this.col, 3));
+    const mat = new THREE.PointsMaterial({
+      size: 0.055, map: sparkTexture(), vertexColors: true, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+    });
+    this.points = new THREE.Points(geo, mat);
+    this.points.frustumCulled = false;
+    scene.add(this.points);
+  }
+  burst(p, count, speed, spread = 1){
+    for (let n = 0; n < count; n++){
+      const i = this.head; this.head = (this.head + 1) % this.max;
+      const i3 = i*3;
+      this.pos[i3] = p.x; this.pos[i3+1] = p.y; this.pos[i3+2] = p.z;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      const s  = speed * (0.35 + Math.random()*0.9);
+      this.vel[i3]   = Math.sin(ph)*Math.cos(th)*s*spread;
+      this.vel[i3+1] = Math.abs(Math.cos(ph))*s*0.7 + 0.4*s;
+      this.vel[i3+2] = Math.sin(ph)*Math.sin(th)*s*spread + s*0.5;
+      this.ttl[i] = this.life[i] = 0.35 + Math.random()*0.55;
+      this.col[i3] = 1; this.col[i3+1] = 0.86; this.col[i3+2] = 0.58;
+    }
+    this.points.geometry.attributes.position.needsUpdate = true;
+    this.points.geometry.attributes.color.needsUpdate = true;
+  }
+  update(dt){
+    let dirty = false;
+    for (let i = 0; i < this.max; i++){
+      if (this.life[i] <= 0) continue;
+      dirty = true;
+      const i3 = i*3;
+      this.life[i] -= dt;
+      const k = Math.max(this.life[i] / this.ttl[i], 0);
+      this.vel[i3+1] -= 6.2 * dt;                       // gravity
+      const drag = 1 - Math.min(2.4*dt, 0.6);
+      this.vel[i3] *= drag; this.vel[i3+1] *= drag; this.vel[i3+2] *= drag;
+      this.pos[i3]   += this.vel[i3]   * dt;
+      this.pos[i3+1] += this.vel[i3+1] * dt;
+      this.pos[i3+2] += this.vel[i3+2] * dt;
+      const kk = k*k;
+      this.col[i3] = kk; this.col[i3+1] = kk*0.72; this.col[i3+2] = kk*0.34;
+      if (this.life[i] <= 0){
+        this.col[i3] = this.col[i3+1] = this.col[i3+2] = 0;
+        this.pos[i3] = this.pos[i3+1] = this.pos[i3+2] = -9999;
+      }
+    }
+    if (dirty){
+      this.points.geometry.attributes.position.needsUpdate = true;
+      this.points.geometry.attributes.color.needsUpdate = true;
+    }
+  }
+}
+
+/* ================================================================
+   5. GLOW / DUST
+   No EffectComposer: bloom is approximated with additive billboards.
+   This is the one place the build knowingly falls short of the spec.
+   ================================================================ */
+
+// A panel, not a point. Alpha falls off on Chebyshev distance — max(|x|,|y|) —
+// which gives a square edge rather than a circular one, and the colour ramp
+// runs amber at the centre to deep orange at the lips so it reads as melt
+// rather than as a white energy source.
+let _panelTex = null;
+function panelTexture(){
+  if (_panelTex) return _panelTex;
+  const N = 128;
+  const c = document.createElement('canvas'); c.width = c.height = N;
+  const g = c.getContext('2d');
+  const img = g.createImageData(N, N);
+  const stops = [
+    [0.00, 255, 214, 156],
+    [0.45, 255, 158,  62],
+    [0.72, 240,  96,  20],
+    [1.00, 176,  38,   6]
+  ];
+  for (let y = 0; y < N; y++){
+    for (let x = 0; x < N; x++){
+      const nx = (x / (N-1)) * 2 - 1;
+      const ny = (y / (N-1)) * 2 - 1;
+      const d = Math.min(Math.max(Math.abs(nx), Math.abs(ny)), 1);
+      let r=0, gg=0, bb=0;
+      for (let i = 1; i < stops.length; i++){
+        if (d <= stops[i][0] || i === stops.length-1){
+          const a = stops[i-1], b = stops[i];
+          const t = Math.min(Math.max((d - a[0]) / (b[0] - a[0]), 0), 1);
+          r = a[1] + (b[1]-a[1])*t; gg = a[2] + (b[2]-a[2])*t; bb = a[3] + (b[3]-a[3])*t;
+          break;
+        }
+      }
+      // solid to 0.70, then a short soft lip so the square edge stays a square
+      const alpha = d < 0.70 ? 1 : Math.max(0, 1 - (d - 0.70) / 0.30);
+      const o = (y*N + x) * 4;
+      img.data[o] = r; img.data[o+1] = gg; img.data[o+2] = bb;
+      img.data[o+3] = Math.round(alpha * alpha * 255);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  _panelTex = new THREE.CanvasTexture(c);
+  _panelTex.colorSpace = THREE.SRGBColorSpace;
+  return _panelTex;
+}
+
+function buildGlow(){
+  const tex = sparkTexture();
+  const mk = (size, colour, opacity) => {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(size, size),
+      new THREE.MeshBasicMaterial({ map:tex, color:colour, transparent:true, opacity,
+        blending:THREE.AdditiveBlending, depthWrite:false })
+    );
+    scene.add(m);
+    return m;
+  };
+  const halo = mk(2.6, 0xd85a18, 0);   halo.position.set(0, -0.3, -0.5);
+  const dust = mk(2.8, 0x5c6b80, 0);   dust.position.set(0, -2.0, 0.9);
+
+  // The Beat 7 wash is parented to the CAMERA with depth testing off, so the
+  // thumb base — or any other part of the hand that happens to sit in front of
+  // the palm — cannot punch a hole in the reveal.
+  const wash = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map:panelTexture(), color:0xff8a24, transparent:true, opacity:0,
+      blending:THREE.AdditiveBlending, depthWrite:false, depthTest:false })
+  );
+  wash.position.set(0, 0.08, -1.2);
+  wash.renderOrder = 999;
+  camera.add(wash);
+
+  return { halo, dust, wash };
+}
+
+/* ================================================================
+   6. CHOREOGRAPHY — BEATS 1..6
+   ================================================================ */
+const CURL = { prox: 1.48, mid: 1.85, dist: 1.20 };
+
+// Thumb pose. rollRest/rollLatch are the axial rotation of the thumb column:
+// at rest the nail faces laterally (+X) and the pad faces the fingers; by the
+// latch the column has pronated so the nail faces camera and the pad is down
+// on the fingers it is holding shut.
+const THUMB = {
+  rollRest: 1.45, rollLatch: 0.10,
+  sweepRest: -0.62, sweepLatch: 0.50,
+  liftRest:   0.22, liftLatch:  0.38,
+  proxLatch:  0.64, distLatch:  0.58
+};
+
+// Cascade spread: how far apart the four fingertip contacts sit. Small values
+// fuse them into one impact; widen to read them as separate events. §1.3 wants
+// sequenced, item 1 of the feedback wants one blow — this is the dial between.
+const CASCADE_SPREAD = 0.028;
+
+// The melt held inside the fist. `light` is the interior point light, which is
+// what lights the inner faces of the fingers; `flickerHz` values are summed so
+// the pulse is irregular rather than a clean sine.
+const MELT = { billet: 3.0, light: 2.6, flickerA: 2.3, flickerB: 5.7, flickerDepth: 0.22,
+               spitEvery: 0.38 };
+
+// Proximity grip. Nothing happens until the pointer is inside `radius` px of a
+// finger; `max` is the extra curl as a multiplier on the closed pose. `spill`
+// is how much of their own proximity the non-nearest fingers keep, so the
+// nearest finger is the one that visibly moves. `ease` is the smoothing rate.
+const GRIP = { radius: 130, max: 0.10, ease: 7.0, couple: [1, 0.42, 0.16, 0.06] };
+const ANTIC = -0.17;
+let promptReady = false;
+
+function setFingerCurl(f, k){
+  f.joints[0].rotation.x = CURL.prox * k;
+  f.joints[1].rotation.x = CURL.mid  * k;
+  f.joints[2].rotation.x = CURL.dist * k;
+}
+
+function buildIntro(){
+  const tl = new Timeline();
+  const H = hand;
+
+  // --- Beat 1: rise, with focus pull and a ground puff -----------
+  tl.add(0.00, 1.50, 'outCubic', p => {
+    H.root.position.y = -4.4 + (4.4 - 0.62) * p;
+    canvas.style.filter = `blur(${(1-p) * 7}px)`;
+  });
+  tl.add(0.00, 1.20, 'outCubic', p => { glow.dust.material.opacity = 0.30 * Math.sin(p*Math.PI); });
+  tl.add(0.00, 1.60, 'outCubic', p => { glow.dust.scale.setScalar(0.6 + p*1.5); });
+  tl.add(1.50, 0.45, 'outElastic', p => { H.root.position.y = -0.62 + 0.12 * (1-p); });
+
+  // --- Beat 2: anticipation -------------------------------------
+  tl.add(1.86, 0.15, 'outCubic', p => {
+    FINGERS.forEach(s => setFingerCurl(H.fingers[s.name], ANTIC * p));
+    H.thumb.root.rotation.z = THUMB.sweepRest - 0.14*p;
+  });
+
+  // --- Beat 3: the clench, staggered pinky -> index --------------
+  const order = ['pinky','ring','middle','index'];
+  order.forEach((name, i) => {
+    const start = 2.02 + i*CASCADE_SPREAD;
+    tl.add(start, 0.22, 'inOutCubic', p => {
+      setFingerCurl(H.fingers[name], ANTIC + (1 - ANTIC) * p);
+    });
+    // contact ticks stay sequenced, but small — they are the texture inside
+    // the blow, not the blow itself
+    tl.mark(start + 0.205, () => {
+      sparks.burst(tipWorld(H.fingers[name]), 11, 1.7, 0.7);
+    });
+  });
+
+  tl.add(2.02, 0.34, 'inOutCubic', p => { H.palmShade.material.opacity = 0.80 * p; });
+
+  // --- Beat 3b: thumb is the latch, and moves last ---------------
+  tl.add(2.05, 0.28, 'inOutCubic', p => {
+    H.thumb.root.rotation.z = (THUMB.sweepRest - 0.14) + (THUMB.sweepLatch - THUMB.sweepRest + 0.14) * p;
+    H.thumb.root.rotation.x =  THUMB.liftRest + (THUMB.liftLatch - THUMB.liftRest) * p;
+    // the roll leads the flexion: the column pronates first, so the joints
+    // then bend the tip AROUND the fingers rather than back away from them
+    H.thumb.meta.rotation.y = THUMB.rollRest + (THUMB.rollLatch - THUMB.rollRest) * Math.min(p*1.35, 1);
+    H.thumb.joints[1].rotation.x = THUMB.proxLatch * p;
+    H.thumb.joints[2].rotation.x = THUMB.distLatch * p;
+  });
+
+  // --- Beat 4: thumb-lock impact --------------------------------
+  tl.mark(2.33, () => {
+    // one blow: every fingertip and the thumb seat inside the same event
+    order.forEach(name => sparks.burst(tipWorld(H.fingers[name]), 26, 3.1, 0.95));
+    sparks.burst(tipWorld({joints:H.thumb.joints, tipLocal:0.28}), 34, 3.2, 1.0);
+    flashEl.style.opacity = '0.85';
+    jolt.t = 0.16;
+    setTimeout(()=>{ flashEl.style.transition='opacity .22s ease'; flashEl.style.opacity='0'; }, 34);
+  });
+
+  // recoil: plates compress, rattle, lock rigid
+  tl.add(2.33, 0.42, 'outElastic', p => {
+    const k = 1 - p;
+    H.palm.scale.set(1 - 0.028*k, 1 - 0.034*k, 1 - 0.020*k);
+    H.root.rotation.z = 0.030 * k;
+  });
+
+  tl.mark(2.40, () => {
+    sparks.burst(tipWorld({joints:H.thumb.joints, tipLocal:0.28}), 14, 1.6, 0.8);
+  });
+
+  // --- Beat 5: forge glow at the seams --------------------------
+  tl.add(2.44, 1.25, 'outQuint', p => {
+    glowLevel = p;
+    seams.forEach(sm => { sm.mat.opacity = sm.gain * p; });
+    glow.halo.material.opacity = 0.19 * p;
+    glow.halo.scale.set((0.75 + p*0.45) * 1.45, (0.75 + p*0.45) * 0.72, 1);
+    H.melt.mass.material.opacity = p;
+    H.melt.lobe.material.opacity = p;
+    H.melt.light.intensity       = MELT.light * p;
+  });
+  tl.mark(3.69, () => { breathing = true; });
+
+  // --- Beat 5b: wordmark, cooling from white-hot to rust ---------
+  const wmName = document.getElementById('wm-name');
+  const hot = new THREE.Color(0xFFF3E2), cool = new THREE.Color(0xC4531D), tmp = new THREE.Color();
+  tl.add(2.75, 0.55, 'outCubic', p => { wmLayer.style.opacity = String(p); });
+  tl.add(2.85, 1.15, 'inOutCubic', p => {
+    tmp.copy(hot).lerp(cool, p);
+    wmName.setAttribute('fill', '#' + tmp.getHexString());
+  });
+  ['wm-sub','wm-rule','wm-d1','wm-d2','wm-br1','wm-br2'].forEach((id, i) => {
+    tl.add(3.15 + i*0.05, 0.45, 'outCubic', p => {
+      document.getElementById(id).setAttribute('opacity', String(p));
+    });
+  });
+
+  // --- Beat 6: prompt ------------------------------------------
+  tl.mark(4.05, () => { promptReady = true; });
+  tl.add(4.05, 0.6, 'outCubic', p => { promptEl.style.opacity = String(p * 0.9); });
+
+  introTL = tl;
+}
+
+/* ================================================================
+   7. BEAT 7 — UNFOLD AND REVEAL
+   Constructive, not destructive: the fist is never broken. The
+   fingers relax, the palm is revealed changed, camera pushes in.
+   ================================================================ */
+function startReveal(){
+  if (!promptReady || revealTL) return;
+  promptReady = false;
+  overFist = false;
+  pointerPx = null;
+  for (const spec of FINGERS){ grip[spec.name] = 0; gripTarget[spec.name] = 0; }
+  stingEl.style.cursor = 'default';
+  breathing = false;
+  promptEl.style.transition = 'opacity .3s ease';
+  promptEl.style.opacity = '0';
+
+  const H = hand;
+  const tl = new Timeline();
+
+  // thumb releases first — the latch has to come off
+  tl.add(0.00, 0.34, 'inOutCubic', p => {
+    H.thumb.root.rotation.z = THUMB.sweepLatch + (THUMB.sweepRest - THUMB.sweepLatch) * p;
+    H.thumb.root.rotation.x = THUMB.liftLatch  + (THUMB.liftRest  - THUMB.liftLatch)  * p;
+    H.thumb.meta.rotation.y = THUMB.rollLatch  + (THUMB.rollRest  - THUMB.rollLatch)  * p;
+    H.thumb.joints[1].rotation.x = THUMB.proxLatch * (1-p);
+    H.thumb.joints[2].rotation.x = THUMB.distLatch * (1-p);
+  });
+
+  // fingers uncurl, index leading back out
+  ['index','middle','ring','pinky'].forEach((name, i) => {
+    tl.add(0.20 + i*0.04, 0.52, 'inOutCubic', p => setFingerCurl(H.fingers[name], 1 - p));
+  });
+
+  // The palm is revealed changed: it is now the source. The two lobes run
+  // together into ONE mass and it swells to a handful. Growth is front-loaded
+  // (outCubic) and finishes before the panel comes up — if it eases in slowly
+  // the largest moment lands under the wash and is never seen.
+  const massFrom = H.melt.mass.position.clone();
+  const lobeFrom = H.melt.lobe.position.clone();
+  const massTo   = new THREE.Vector3(0, 0.24, 0.30);
+
+  tl.add(0.18, 0.52, 'outCubic', p => {
+    const k = 1 + p * (MELT.billet - 1);
+    H.melt.mass.scale.set(k * 1.05, k * 0.78, k * 0.55);
+    H.melt.mass.position.lerpVectors(massFrom, massTo, p);
+    // the lobe travels into the mass and is absorbed by it
+    H.melt.lobe.position.lerpVectors(lobeFrom, massTo, Math.min(p * 2.4, 1));
+    H.melt.lobe.scale.setScalar(Math.max(1 - p * 3.2, 0.001));
+    H.melt.lobe.material.opacity = Math.max(1 - p * 4.0, 0);
+    H.melt.light.position.copy(H.melt.mass.position);
+    H.melt.light.intensity = MELT.light * (1 + p * 1.1);
+    H.melt.light.distance  = 1.5 + p * 2.2;
+    glow.halo.material.opacity = 0.19 * Math.max(0, 1 - p * 1.6);
+    seams.forEach(sm => { sm.mat.opacity = sm.gain * Math.max(0, 1 - p * 1.9); });
+  });
+
+  // it holds at full size, then goes under the panel rather than vanishing early
+  tl.add(0.86, 0.34, 'inQuad', p => {
+    H.melt.mass.material.opacity = 1 - p;
+    const k = MELT.billet * (1 + p * 0.18);
+    H.melt.mass.scale.set(k * 1.05, k * 0.78, k * 0.55);
+  });
+
+  // the square panel comes up behind the mass, not instead of it
+  tl.add(0.70, 0.66, 'inCubic', p => {
+    H.core.material.opacity = Math.min(p * 1.6, 1);
+    H.core.scale.setScalar(0.55 + p * 1.55);
+  });
+
+  tl.add(0.84, 0.42, 'inOutCubic', p => { H.palmShade.material.opacity = 0.80 * (1 - p); });
+
+  // wash rides the camera, so the thumb cannot occlude the reveal
+  tl.add(0.76, 0.86, 'inCubic', p => {
+    // grows to the viewport's proportions, so what opens up is the shape of
+    // the page rather than a circle in the palm
+    const k = 0.34 + p * 7.6;
+    glow.wash.material.opacity = Math.min(p * 1.35, 1);
+    glow.wash.scale.set(k * camera.aspect, k, 1);
+  });
+
+  // the hand goes INTO the light rather than staying a dark shape in front of
+  // it — without this the thumb and fingers read as cut-outs over the reveal
+  const _em = new THREE.Color();
+  tl.add(0.74, 0.74, 'inCubic', p => {
+    _em.setRGB(p, p*0.84, p*0.66);
+    MAT.steel.emissive.copy(_em);
+    MAT.dark.emissive.copy(_em);
+    MAT.rust.emissive.copy(_em);
+    MAT.hinge.emissive.copy(_em);
+  });
+
+  // camera push-in on the glowing palm
+  tl.add(0.52, 1.06, 'inOutCubic', p => {
+    camera.position.z = 5.3 + (1.65 - 5.3) * p;
+    camera.position.y = -0.05 + (-0.52 + 0.05) * p;
+    camera.lookAt(0, -0.55, 0);
+  });
+  tl.add(0.66, 0.82, 'outCubic', p => { wmLayer.style.opacity = String(1 - p); });
+
+  // fabricate into the site
+  tl.add(1.30, 0.45, 'inQuad', p => {
+    flashEl.style.transition = 'none';
+    flashEl.style.opacity = String(p);
+  });
+  tl.mark(1.77, () => {
+    revealSite();
+    flashEl.style.transition = 'opacity .7s ease';
+    flashEl.style.opacity = '0';
+  });
+
+  revealTL = tl.play();
+}
+
+/* ================================================================
+   8. LOOP
+   ================================================================ */
+function tick(){
+  if (!running){ renderer.render(scene, camera); return; }
+  requestAnimationFrame(tick);
+
+  const dt = Math.min(clock.getDelta(), 0.05);
+  idlePhase += dt;
+
+  introTL.update(dt);
+  if (revealTL) revealTL.update(dt);
+  sparks.update(dt);
+
+  // held-beat breathing on the sealed fist
+  if (breathing){
+    // two summed frequencies so the melt flickers instead of pulsing evenly
+    const f = 0.5 + 0.5 * (0.62*Math.sin(idlePhase*MELT.flickerA) +
+                           0.38*Math.sin(idlePhase*MELT.flickerB + 1.7));
+    const b = 1 - MELT.flickerDepth + MELT.flickerDepth * f * 2;
+    // each crack flickers on its own phase and rate — synchronised pulsing is
+    // what makes a glow read as a device rather than as something molten
+    seams.forEach(sm => {
+      const fl = 0.5 + 0.5 * Math.sin(idlePhase * sm.rate + sm.phase);
+      sm.mat.opacity = Math.min(sm.gain * (0.72 + 0.28 * fl) * b, 1);
+    });
+    glow.halo.material.opacity = Math.min(0.19 * b, 1);
+    // the surface itself brightens and dims rather than fading in and out —
+    // an opacity pulse would read as a light, a colour pulse reads as heat
+    const heat = 0.80 + 0.20 * b;
+    hand.melt.mass.material.color.setScalar(heat);
+    hand.melt.lobe.material.color.setScalar(heat);
+    hand.melt.mass.material.opacity = 1;
+    hand.melt.lobe.material.opacity = 1;
+    hand.melt.light.intensity = MELT.light * b;
+    spitTimer -= dt;
+    if (spitTimer <= 0){
+      spitTimer = MELT.spitEvery * (0.6 + Math.random());
+      hand.melt.mass.getWorldPosition(_spit);
+      _spit.x += (Math.random()-0.5) * 0.3;
+      _spit.y += (Math.random()-0.5) * 0.16;
+      sparks.burst(_spit, 3, 0.85, 0.9);
+    }
+    hand.root.position.y = -0.62 + Math.sin(idlePhase * 0.9) * 0.012;
+    updateGrip(dt, true);
+  }
+
+  // screen jolt on impact
+  if (jolt.t > 0){
+    jolt.t -= dt;
+    const k = Math.max(jolt.t / 0.16, 0);
+    const px = (Math.random()*2-1) * 4 * k;
+    const py = (Math.random()*2-1) * 4 * k;
+    canvas.style.transform = `translate(${px}px, ${py}px)`;
+  } else if (canvas.style.transform){
+    canvas.style.transform = '';
+  }
+
+  const _hs = glow.halo.scale.clone();
+  glow.halo.lookAt(camera.position);
+  glow.halo.scale.copy(_hs);
+  glow.dust.lookAt(camera.position);
+
+  renderer.render(scene, camera);
+}
+
+// pulsing prompt, so Beat 6 reads as alive rather than frozen
+setInterval(() => {
+  if (!promptReady) return;
+  const k = 0.55 + 0.45 * (0.5 + 0.5*Math.sin(performance.now()/520));
+  promptEl.style.opacity = String(k);
+}, 40);
+
+start();
