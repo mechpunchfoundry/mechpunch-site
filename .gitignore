@@ -1,0 +1,10 @@
+# Source art — hi-res originals, kept out of the public repo.
+# NOT backed up by git; back these up yourself.
+art/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
