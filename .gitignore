@@ -1,6 +1,11 @@
 # Source art — hi-res originals, kept out of the public repo.
-# NOT backed up by git; back these up yourself.
+# NOT backed up by git; backed up separately.
 art/
+
+# Working notes for Claude Code sessions. Deliberately private: the repo is
+# public and Pages serves the branch, so a tracked copy would be readable at
+# www.mechpunch.com/CLAUDE.md. Lives on disk only.
+CLAUDE.md
 
 # OS / editor cruft
 .DS_Store
