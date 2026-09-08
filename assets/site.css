@@ -195,6 +195,30 @@ h1,h2,h3{ font-weight:800; line-height:1.12; letter-spacing:-0.01em; margin:0; c
   margin:0.5rem 0 1rem;
 }
 .plate p{ margin:0; }
+
+/* The games plate carries a screenshot alongside the copy on anything wide
+   enough for two columns. Padding is floored at 2rem so the corner bracket,
+   which sits 10-32px in, never lands on the image when the two stack. */
+.plate-game{
+  max-width:60rem;
+  padding:clamp(2rem, 4vw, 2.5rem);
+  display:grid;
+  gap:clamp(1.5rem, 3vw, 2rem);
+  align-items:center;
+}
+.plate-body p{ max-width:var(--measure); }
+.plate-shot{ display:block; line-height:0; }
+.plate-shot img{
+  display:block; width:100%; height:auto;
+  border:var(--rule);
+  background:var(--graphite);
+  transition:border-color .2s ease;
+}
+.plate-shot:hover img{ border-color:var(--gunmetal-dim); }
+
+@media (min-width: 46rem){
+  .plate-game{ grid-template-columns:minmax(0, 1fr) minmax(0, 22rem); }
+}
 .go{
   display:inline-block;
   margin-top:1.5rem;
@@ -207,6 +231,87 @@ h1,h2,h3{ font-weight:800; line-height:1.12; letter-spacing:-0.01em; margin:0; c
   padding-bottom:2px;
 }
 .go:hover{ color:var(--forge); border-color:var(--forge); }
+
+/* --- download button --------------------------------------------------
+   Solid --rust-lit with --graphite type. The obvious choice, --hot on
+   --rust, measures 4.17:1 and misses the 4.5:1 AA floor for text this
+   size; this pairing is 6.04:1, and 10.45:1 on the --forge hover.
+   ------------------------------------------------------------------- */
+.dl{
+  display:inline-flex;
+  flex-direction:column;
+  gap:0.15rem;
+  padding:0.7rem 1.4rem;
+  background:var(--rust-lit);
+  color:var(--graphite);
+  text-decoration:none;
+  font-family:'Oswald', system-ui, sans-serif;
+  transition:background .15s ease, transform .15s ease;
+}
+.dl:hover{ background:var(--forge); color:var(--graphite); }
+.dl:active{ transform:translateY(1px); }
+.dl .dl-label{
+  font-size:1rem;
+  letter-spacing:0.06em;
+}
+.dl .dl-meta{
+  font-size:0.75rem;
+  letter-spacing:0.1em;
+  /* Same ink, stepped back: a lighter tone here would drop under AA. */
+  opacity:0.8;
+}
+
+/* Sits under the lede on the game page and inside the plate on the
+   homepage, so it carries its own top margin rather than relying on
+   whatever it happens to follow. */
+.dl-block{ margin-top:clamp(1.5rem, 3vw, 2rem); }
+.dl-note{
+  font-family:'Oswald', system-ui, sans-serif;
+  font-size:0.75rem;
+  letter-spacing:0.08em;
+  color:var(--gunmetal-dim);
+  margin:0.75rem 0 0;
+}
+
+/* --- builds list ------------------------------------------------------
+   One row per build. Older and prototype builds get appended here as
+   further <li class="build">; the markup is the same minus .build-now.
+   ------------------------------------------------------------------- */
+.builds{ list-style:none; margin:0; padding:0; }
+.build{
+  display:flex; flex-wrap:wrap; align-items:center;
+  gap:1rem 1.5rem;
+  padding:clamp(1rem, 2.5vw, 1.35rem) 0;
+  border-top:var(--rule);
+}
+.build:last-child{ border-bottom:var(--rule); }
+.build-id{ flex:1 1 16rem; }
+.build-id h3{
+  font-size:1.0625rem;
+  margin:0;
+  color:var(--gunmetal);
+}
+.build-now .build-id h3{ color:var(--rust-lit); }
+.build-id .meta{
+  font-family:'Oswald', system-ui, sans-serif;
+  font-size:0.8125rem;
+  letter-spacing:0.1em;
+  color:var(--gunmetal-dim);
+  margin:0.35rem 0 0;
+}
+.build .dl{ margin-left:auto; }
+/* Superseded builds are still downloadable, just not the shout. */
+.build:not(.build-now) .dl{
+  background:transparent;
+  color:var(--rust-lit);
+  border:1px solid var(--rust);
+  padding:0.55rem 1.1rem;
+}
+.build:not(.build-now) .dl:hover{
+  background:transparent;
+  color:var(--forge);
+  border-color:var(--forge);
+}
 
 /* --- contact --- */
 .contact ul{ list-style:none; margin:0; padding:0; }
@@ -240,6 +345,119 @@ h1,h2,h3{ font-weight:800; line-height:1.12; letter-spacing:-0.01em; margin:0; c
 }
 .hero img{
   display:block; width:100%; height:auto;
+}
+
+/* --- screenshot filmstrip (game pages) -------------------------------
+   A scroll-snapping horizontal track. It scrolls natively with a trackpad,
+   a touch drag or the keyboard, so it works with no JS at all; the arrows
+   and dots are added by the small inline script at the foot of the page
+   and stay hidden until it runs, rather than sitting there dead.
+
+   Slides are deliberately narrower than the text column. Full-width
+   screenshots swamped the copy, and at this size the next one peeks in
+   at the right edge, which is what tells you the strip scrolls.
+
+   Shipped at the game's native 1440x1000 with an exact half-scale
+   alternate; no image-rendering override, because the browser scales them
+   to a non-integer width and `pixelated` would alias the UI text.
+   ------------------------------------------------------------------ */
+.shots{ --slide: min(78vw, 620px); }
+
+.shots-track{
+  list-style:none; margin:0; padding:0;
+  display:flex;
+  gap:clamp(1rem, 2.5vw, 1.75rem);
+  overflow-x:auto;
+  scroll-snap-type:x mandatory;
+  scroll-behavior:smooth;
+  /* Room for the focus ring, which would otherwise be clipped by the
+     scroll container on the snapped slide. */
+  padding:3px 3px 0.5rem;
+  scroll-padding-inline:3px;
+  overscroll-behavior-x:contain;
+  scrollbar-width:thin;
+  scrollbar-color:var(--edge) transparent;
+}
+.shots-track::-webkit-scrollbar{ height:6px; }
+.shots-track::-webkit-scrollbar-thumb{ background:var(--edge); }
+.shots-track:focus-visible{ outline:2px solid var(--rust-lit); outline-offset:4px; }
+
+.shots-track > li{
+  flex:0 0 var(--slide);
+  scroll-snap-align:start;
+}
+.shots figure{ margin:0; }
+.shots img{
+  display:block; width:100%; height:auto;
+  border:var(--rule);
+  background:var(--iron);
+}
+.shots figcaption{
+  font-family:'Oswald', system-ui, sans-serif;
+  font-size:0.8125rem;
+  letter-spacing:0.08em;
+  color:var(--gunmetal-dim);
+  margin-top:0.75rem;
+}
+
+/* Slides settle as they reach the middle of the track and fall back as they
+   leave it. Scroll-driven, so it tracks a drag exactly and costs no script.
+   Browsers without view timelines simply get flat, fully-lit slides. */
+@supports (animation-timeline: view()){
+  @media (prefers-reduced-motion: no-preference){
+    @keyframes shot-settle{
+      entry 0%, exit 100% { opacity:.45; transform:scale(.94); }
+      entry 100%, exit 0% { opacity:1;   transform:scale(1); }
+    }
+    .shots-track > li{
+      animation:shot-settle linear both;
+      animation-timeline:view(inline);
+      animation-range:entry 0% exit 100%;
+    }
+  }
+}
+
+/* --- filmstrip controls --- */
+.shots-bar{
+  display:flex; align-items:center; gap:0.75rem;
+  margin-top:1rem;
+}
+.shots-nav{
+  flex:none;
+  width:2.25rem; height:2.25rem;
+  display:grid; place-items:center;
+  background:var(--iron);
+  border:var(--rule);
+  color:var(--gunmetal);
+  font-family:'Oswald', system-ui, sans-serif;
+  font-size:1.125rem; line-height:1;
+  cursor:pointer;
+  transition:color .15s ease, border-color .15s ease;
+}
+.shots-nav:hover:not(:disabled){ color:var(--rust-lit); border-color:var(--rust); }
+.shots-nav:disabled{ opacity:.35; cursor:default; }
+
+.shots-dots{
+  list-style:none; margin:0; padding:0;
+  display:flex; gap:0.5rem; align-items:center;
+}
+.shots-dots button{
+  display:block;
+  width:2rem; height:2px;
+  padding:0; border:0;
+  background:var(--edge);
+  cursor:pointer;
+  transition:background .2s ease;
+}
+.shots-dots button:hover{ background:var(--gunmetal-dim); }
+.shots-dots button[aria-current="true"]{ background:var(--rust-lit); }
+/* The bar is a shortcut for the scrolling the track already does, so keep
+   it out of the tab order's way but leave it reachable and labelled. */
+.shots-count{
+  margin-left:auto;
+  font-family:'Oswald', system-ui, sans-serif;
+  font-size:0.75rem; letter-spacing:0.1em;
+  color:var(--gunmetal-dim);
 }
 
 /* --- narrow screens ---------------------------------------------------

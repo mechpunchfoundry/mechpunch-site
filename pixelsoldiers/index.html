@@ -20,7 +20,7 @@
 <meta property="og:image" content="https://www.mechpunch.com/assets/og-pixelsoldiers.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="The Pixel Soldiers: Kaiju logo, its letters carved from cracked stone.">
+<meta property="og:image:alt" content="A Pixel Soldiers: Kaiju mission in progress: a rift burning in the middle of an isometric map, with units holding the ground around it.">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="https://www.mechpunch.com/pixelsoldiers/">
 
@@ -70,6 +70,14 @@
       <h1>Pixel Soldiers: Kaiju</h1>
       <p class="meta">In development</p>
       <p>A tactical roguelite about holding the planet together while it comes apart.</p>
+
+      <div class="dl-block">
+        <a class="dl" href="https://github.com/mechpunchfoundry/PixelSoldiers-Release/releases/latest/download/PixelSoldiersKaiju.exe">
+          <span class="dl-label">Download for Windows</span>
+          <span class="dl-meta">ALPHA BUILD &middot; 44&nbsp;MB</span>
+        </a>
+        <p class="dl-note">Windows only for now. Linux and Steam Deck to follow.</p>
+      </div>
     </section>
 
     <div class="rivet" aria-hidden="true"><span></span></div>
@@ -96,6 +104,105 @@
     <div class="rivet" aria-hidden="true"><span></span></div>
 
     <section class="section">
+      <h2>What it looks like</h2>
+      <div class="shots" role="group" aria-roledescription="carousel" aria-label="Screenshots">
+        <ul class="shots-track" id="shots-track" tabindex="0" role="list"
+            aria-label="Screenshots — scroll sideways">
+          <li>
+          <figure>
+            <img src="../assets/shot-action.webp"
+                 srcset="../assets/shot-action-720.webp 720w, ../assets/shot-action.webp 1440w"
+                 sizes="(max-width: 1080px) 100vw, 1080px"
+                 width="1440" height="1000" loading="lazy" decoding="async"
+                 alt="A mission in progress: an isometric map with a rift burning in the centre, units spread across fields and a town, and the battle readout along the bottom.">
+            <figcaption>A mission in progress.</figcaption>
+          </figure>
+          </li>
+          <li>
+          <figure>
+            <img src="../assets/shot-world.webp"
+                 srcset="../assets/shot-world-720.webp 720w, ../assets/shot-world.webp 1440w"
+                 sizes="(max-width: 1080px) 100vw, 1080px"
+                 width="1440" height="1000" loading="lazy" decoding="async"
+                 alt="The world map: a globe covered in mission nodes, with one selected showing its terrain, difficulty and objective, and the current deck listed alongside.">
+            <figcaption>Picking the next node.</figcaption>
+          </figure>
+          </li>
+          <li>
+          <figure>
+            <img src="../assets/shot-packopening.webp"
+                 srcset="../assets/shot-packopening-720.webp 720w, ../assets/shot-packopening.webp 1440w"
+                 sizes="(max-width: 1080px) 100vw, 1080px"
+                 width="1440" height="1000" loading="lazy" decoding="async"
+                 alt="A pack of army cards opened over the catalogue screen: a platoon, a section, a howitzer and an effect card laid out face up.">
+            <figcaption>Opening a pack of army cards.</figcaption>
+          </figure>
+          </li>
+          <li>
+          <figure>
+            <img src="../assets/shot-techtree.webp"
+                 srcset="../assets/shot-techtree-720.webp 720w, ../assets/shot-techtree.webp 1440w"
+                 sizes="(max-width: 1080px) 100vw, 1080px"
+                 width="1440" height="1000" loading="lazy" decoding="async"
+                 alt="The armour branch of the research tree, its ranks connected in columns, with one plate hovered to show what it does.">
+            <figcaption>One branch of the research tree.</figcaption>
+          </figure>
+          </li>
+          <li>
+          <figure>
+            <img src="../assets/shot-splash.webp"
+                 srcset="../assets/shot-splash-720.webp 720w, ../assets/shot-splash.webp 1440w"
+                 sizes="(max-width: 1080px) 100vw, 1080px"
+                 width="1440" height="1000" loading="lazy" decoding="async"
+                 alt="The title screen: the Pixel Soldiers: Kaiju logo over a ruined city, above the new game, continue and load options.">
+            <figcaption>The title screen.</figcaption>
+          </figure>
+          </li>
+        </ul>
+
+        <!-- Unhidden by the script at the foot of the page. Without it the
+             track still scrolls, so there is nothing here to leave broken. -->
+        <div class="shots-bar" id="shots-bar" hidden>
+          <button type="button" class="shots-nav" data-dir="-1" aria-label="Previous screenshot">&lsaquo;</button>
+          <button type="button" class="shots-nav" data-dir="1" aria-label="Next screenshot">&rsaquo;</button>
+          <ol class="shots-dots">
+            <li><button type="button" data-go="1" aria-label="Screenshot 1: A mission in progress"></button></li>
+            <li><button type="button" data-go="2" aria-label="Screenshot 2: Picking the next node"></button></li>
+            <li><button type="button" data-go="3" aria-label="Screenshot 3: Opening a pack of army cards"></button></li>
+            <li><button type="button" data-go="4" aria-label="Screenshot 4: One branch of the research tree"></button></li>
+            <li><button type="button" data-go="5" aria-label="Screenshot 5: The title screen"></button></li>
+          </ol>
+          <p class="shots-count" aria-hidden="true"><span id="shots-at">1</span> / 5</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="rivet" aria-hidden="true"><span></span></div>
+
+    <section class="section" id="downloads">
+      <h2>Downloads</h2>
+      <ul class="builds">
+        <!-- Newest first. Older and prototype builds are appended below as
+             further <li class="build"> rows - same markup minus .build-now,
+             which is what makes this one the loud one. Pin superseded builds
+             to their own tag rather than /latest/, or they all point at the
+             same file:
+             .../releases/download/v0.1.2/PixelSoldiersKaiju.exe -->
+        <li class="build build-now">
+          <div class="build-id">
+            <h3>Alpha v0.1.3</h3>
+            <p class="meta">Windows &middot; 44&nbsp;MB &middot; current build</p>
+          </div>
+          <a class="dl" href="https://github.com/mechpunchfoundry/PixelSoldiers-Release/releases/latest/download/PixelSoldiersKaiju.exe">
+            <span class="dl-label">Download</span>
+          </a>
+        </li>
+      </ul>
+    </section>
+
+    <div class="rivet" aria-hidden="true"><span></span></div>
+
+    <section class="section">
       <h2>Where it is</h2>
       <p>In development, by one person, with no announced date. When there is something worth showing, it will show up here first.</p>
       <p class="meta">Planned for Windows and Linux, with Steam Deck in mind.</p>
@@ -111,6 +218,74 @@
 
   </div>
 </main>
+
+<!-- Filmstrip controls. A classic script, not a module, and inline: an
+     external module gets an opaque origin over file:// and is blocked, the
+     same trap the homepage sting avoids. Everything here is an enhancement
+     over a track that already scrolls on its own. -->
+<script>
+(function () {
+  var track = document.getElementById('shots-track');
+  var bar   = document.getElementById('shots-bar');
+  if (!track || !bar) return;
+
+  var slides = Array.prototype.slice.call(track.children);
+  var dots   = Array.prototype.slice.call(bar.querySelectorAll('[data-go]'));
+  var navs   = Array.prototype.slice.call(bar.querySelectorAll('[data-dir]'));
+  var at     = document.getElementById('shots-at');
+  var i      = 0;
+
+  bar.hidden = false;
+
+  function show(n) {
+    i = n;
+    dots.forEach(function (d, k) { d.setAttribute('aria-current', k === n ? 'true' : 'false'); });
+    if (at) at.textContent = n + 1;
+    navs[0].disabled = n === 0;
+    navs[1].disabled = n === slides.length - 1;
+  }
+
+  function go(n) {
+    n = Math.max(0, Math.min(slides.length - 1, n));
+    // scrollIntoView would drag the page vertically too; this only moves
+    // the track, and inherits its smooth scroll-behavior.
+    track.scrollTo({ left: slides[n].offsetLeft - slides[0].offsetLeft });
+    show(n);
+  }
+
+  navs.forEach(function (b) {
+    b.addEventListener('click', function () { go(i + Number(b.dataset.dir)); });
+  });
+  dots.forEach(function (b) {
+    b.addEventListener('click', function () { go(Number(b.dataset.go) - 1); });
+  });
+
+  // Follow the track when it is scrolled by hand, rather than assuming the
+  // buttons are the only thing that moves it. Nearest-left-edge rather than
+  // an IntersectionObserver: with a slide this narrow the next one is always
+  // most of the way into view, so "is it visible" picks the wrong slide.
+  var tick = 0;
+  track.addEventListener('scroll', function () {
+    if (tick) return;
+    tick = requestAnimationFrame(function () {
+      tick = 0;
+      var x = track.scrollLeft + slides[0].offsetLeft, best = 0, d = Infinity;
+      slides.forEach(function (s, k) {
+        var gap = Math.abs(s.offsetLeft - x);
+        if (gap < d) { d = gap; best = k; }
+      });
+      show(best);
+    });
+  }, { passive: true });
+
+  track.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight') { e.preventDefault(); go(i + 1); }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); go(i - 1); }
+  });
+
+  show(0);
+}());
+</script>
 
 </body>
 </html>
