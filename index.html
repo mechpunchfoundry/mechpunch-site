@@ -130,6 +130,7 @@
         </svg>
       </div>
       <nav class="nav" aria-label="Primary">
+        <a href="?intro">Intro</a>
         <a href="#games">Games</a>
         <a href="#studio">Studio</a>
         <a href="#contact">Contact</a>
@@ -221,6 +222,18 @@ const canvas   = document.getElementById('forge');
 
 const prefersReduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const seenThisSession = sessionStorage.getItem('mpf.sting') === '1';
+
+/* The nav's Intro item is a plain link to `?intro`, so it works from the
+   game page and the 404 page without either of them carrying any script.
+   It overrides BOTH gates, reduced motion included: that preference is
+   about motion nobody asked for, and this is someone asking. The flag is
+   then wiped from the URL so a later refresh doesn't replay for ever and
+   the address stays clean enough to copy. */
+const forceIntro = new URLSearchParams(location.search).has('intro');
+if (forceIntro){
+  try { history.replaceState(null, '', location.pathname + location.hash); }
+  catch (e) { /* file:// can refuse this; the sting still plays */ }
+}
 const isCoarse = matchMedia('(pointer: coarse)').matches;
 
 function revealSite(){
@@ -235,7 +248,7 @@ let running = false;
 
 // invoked at the foot of this module, once every declaration below exists
 function start(){
-  if (prefersReduced || seenThisSession){
+  if (!forceIntro && (prefersReduced || seenThisSession)){
     revealSite();
   } else {
     document.body.style.overflow = 'hidden';

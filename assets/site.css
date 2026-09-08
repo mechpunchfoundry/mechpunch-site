@@ -336,6 +336,7 @@ h1,h2,h3{ font-weight:800; line-height:1.12; letter-spacing:-0.01em; margin:0; c
 }
 .foot .mark{ width:26px; height:34px; aspect-ratio:auto; opacity:0.55; }
 
+
 /* --- hero image (game pages) --- */
 .hero{
   /* The title art is transparent PNG-style WebP: let the page ground show
