@@ -147,6 +147,10 @@ h1,h2,h3{ font-weight:800; line-height:1.12; letter-spacing:-0.01em; margin:0; c
   margin:clamp(1.25rem, 3vw, 2rem) 0 0;
   color:#AEB4BC;
 }
+/* A listing page, not a pitch: the full lede padding pushes the list off
+   the first screen. */
+.lede-short{ padding-block:clamp(2.5rem, 7vw, 4.5rem) clamp(1rem, 3vw, 1.5rem); }
+.lede-short .dl-note{ margin-top:0.75rem; }
 
 /* --- rivet rule: the wordmark's own device, reused as a section boundary --- */
 .rivet{
@@ -286,17 +290,22 @@ h1,h2,h3{ font-weight:800; line-height:1.12; letter-spacing:-0.01em; margin:0; c
 }
 .build:last-child{ border-bottom:var(--rule); }
 .build-id{ flex:1 1 16rem; }
-.build-id h3{
+.build-id h2, .build-id h3{
   font-size:1.0625rem;
   margin:0;
   color:var(--gunmetal);
 }
-.build-now .build-id h3{ color:var(--rust-lit); }
+.build-now .build-id h2, .build-now .build-id h3{ color:var(--rust-lit); }
 .build-id .meta{
   font-family:'Oswald', system-ui, sans-serif;
   font-size:0.8125rem;
   letter-spacing:0.1em;
   color:var(--gunmetal-dim);
+  margin:0.35rem 0 0;
+}
+/* What changed in the build: one plain line under the meta. Optional. */
+.build-id .build-notes{
+  color:#AEB4BC;
   margin:0.35rem 0 0;
 }
 .build .dl{ margin-left:auto; }

@@ -9,6 +9,7 @@ Live at **https://www.mechpunch.com** (GitHub Pages).
 ```
 index.html          homepage; the three.js fist sting is inlined (see below)
 pixelsoldiers/      game page, noindex so the homepage stays the way in
+  downloads/        every build, newest first
 404.html            custom not-found page
 assets/             site.css, fonts, icons, og cards, game art
 robots.txt          crawlers welcome, AI included
