@@ -269,6 +269,9 @@ h1,h2,h3{ font-weight:800; line-height:1.12; letter-spacing:-0.01em; margin:0; c
    homepage, so it carries its own top margin rather than relying on
    whatever it happens to follow. */
 .dl-block{ margin-top:clamp(1.5rem, 3vw, 2rem); }
+/* One button per platform, side by side; they stack when there isn't room. */
+.dl-row{ display:flex; flex-wrap:wrap; gap:0.75rem; }
+.dl-note code{ font-size:inherit; color:var(--gunmetal); white-space:nowrap; }
 .dl-note{
   font-family:'Oswald', system-ui, sans-serif;
   font-size:0.75rem;
@@ -308,7 +311,7 @@ h1,h2,h3{ font-weight:800; line-height:1.12; letter-spacing:-0.01em; margin:0; c
   color:#AEB4BC;
   margin:0.35rem 0 0;
 }
-.build .dl{ margin-left:auto; }
+.build .dl-row{ margin-left:auto; }
 /* Superseded builds are still downloadable, just not the shout. */
 .build:not(.build-now) .dl{
   background:transparent;
